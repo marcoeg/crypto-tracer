@@ -103,11 +103,28 @@ $(BUILD_DIR)/$(PROJECT_NAME): $(MAIN_SOURCES) $(EBPF_SKELETONS) | $(BUILD_DIR)
 
 # Build unit tests
 .PHONY: test-unit
-test-unit: $(BUILD_DIR)/test-unit
+test-unit: $(EBPF_SKELETONS)
+	@echo "Running unit tests..."
+	@$(MAKE) run-unit-tests
 
-$(BUILD_DIR)/test-unit: $(UNIT_TEST_SOURCES) | $(BUILD_DIR)
-	@echo "Compiling unit tests..."
-	$(CC) $(CFLAGS) $(UNIT_TEST_SOURCES) -o $@ $(LDFLAGS)
+# Filter out main.c from sources to avoid multiple main() definitions
+MAIN_SOURCES_NO_MAIN := $(filter-out $(SRC_DIR)/main.c,$(MAIN_SOURCES))
+
+# Build and run each unit test separately
+.PHONY: run-unit-tests
+run-unit-tests:
+	@for test_file in $(UNIT_TEST_SOURCES); do \
+		test_name=$$(basename $$test_file .c); \
+		echo "Building and running $$test_name..."; \
+		$(CC) $(CFLAGS) $$test_file $(MAIN_SOURCES_NO_MAIN) -o $(BUILD_DIR)/$$test_name $(LDFLAGS) 2>&1 | grep -v "warning:" || true; \
+		if [ -f $(BUILD_DIR)/$$test_name ]; then \
+			$(BUILD_DIR)/$$test_name || exit 1; \
+			echo ""; \
+		else \
+			echo "Failed to build $$test_name"; \
+			exit 1; \
+		fi; \
+	done
 
 # Build integration tests
 .PHONY: test-integration

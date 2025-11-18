@@ -106,6 +106,79 @@ typedef struct event_buffer_pool {
     processed_event_t *free_list; /* Linked list of free events */
 } event_buffer_pool_t;
 
+/* Profile structure for process profiling */
+typedef struct {
+    char *profile_version;
+    char *generated_at;
+    int duration_seconds;
+    
+    struct {
+        uint32_t pid;
+        char *name;
+        char *exe;
+        char *cmdline;
+        uint32_t uid;
+        uint32_t gid;
+        char *start_time;
+    } process;
+    
+    struct {
+        char *name;
+        char *path;
+        char *load_time;
+    } *libraries;
+    size_t library_count;
+    
+    struct {
+        char *path;
+        char *type;
+        int access_count;
+        char *first_access;
+        char *last_access;
+        char *mode;
+    } *files_accessed;
+    size_t file_count;
+    
+    struct {
+        char *function_name;
+        int count;
+    } *api_calls;
+    size_t api_call_count;
+    
+    struct {
+        int total_events;
+        int libraries_loaded;
+        int files_accessed;
+        int api_calls_made;
+    } statistics;
+} profile_t;
+
+/* Snapshot structure for system-wide inventory */
+typedef struct {
+    char *snapshot_version;
+    char *generated_at;
+    char *hostname;
+    char *kernel;
+    
+    struct {
+        uint32_t pid;
+        char *name;
+        char *exe;
+        char **libraries;
+        size_t library_count;
+        char **open_crypto_files;
+        size_t file_count;
+        char *running_as;
+    } *processes;
+    size_t process_count;
+    
+    struct {
+        int total_processes;
+        int total_libraries;
+        int total_files;
+    } summary;
+} snapshot_t;
+
 /* Forward declarations */
 struct ebpf_manager;
 struct event_processor;
