@@ -19,7 +19,7 @@ LLVM_STRIP := llvm-strip
 # Compiler flags
 CFLAGS := -Wall -Wextra -std=c11 -O2 -g
 CFLAGS += -I$(INCLUDE_DIR) -I$(BUILD_DIR)
-LDFLAGS := -lelf -lz -lbpf
+LDFLAGS := -lelf -lz -lbpf -lcap
 
 # eBPF compiler flags
 BPF_CFLAGS := -target bpf -D__TARGET_ARCH_x86 -Wall -O2 -g
@@ -137,6 +137,10 @@ check-deps:
 	@command -v $(CLANG) >/dev/null || (echo "Error: clang not found" && exit 1)
 	@command -v $(BPFTOOL) >/dev/null || echo "Warning: bpftool not found (skeleton generation will fail)"
 	@command -v $(LLVM_STRIP) >/dev/null || echo "Warning: llvm-strip not found (eBPF programs won't be stripped)"
+	@echo -n "Checking for libcap... "
+	@echo "#include <sys/capability.h>" | $(CC) -E - >/dev/null 2>&1 && echo "found" || (echo "not found - install libcap-dev" && exit 1)
+	@echo -n "Checking for libelf... "
+	@echo "#include <libelf.h>" | $(CC) -E - >/dev/null 2>&1 && echo "found" || (echo "not found - install libelf-dev" && exit 1)
 	@echo "Dependency check complete"
 
 # Show build configuration
