@@ -87,4 +87,7 @@ void filter_set_destroy(filter_set_t *set);
 bool glob_match(const char *pattern, const char *string);
 bool substring_match(const char *pattern, const char *string);
 
+/* Privacy filtering functions */
+int apply_privacy_filter(processed_event_t *event, bool redact_enabled);
+
 #endif /* __EVENT_PROCESSOR_H__ */

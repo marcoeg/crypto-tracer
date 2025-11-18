@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include "include/event_processor.h"
+#include "include/privacy_filter.h"
 #include "ebpf/common.h"
 
 /**
@@ -731,4 +732,68 @@ char *extract_library_name(const char *library_path) {
     library_name[name_len] = '\0';
     
     return library_name;
+}
+
+/**
+ * Apply privacy filtering to event paths
+ * Requirements: 6.1, 6.2, 6.3, 6.4
+ * 
+ * @param event Event to filter
+ * @param redact_enabled Whether redaction is enabled (false if --no-redact)
+ * @return 0 on success, -1 on failure
+ */
+int apply_privacy_filter(processed_event_t *event, bool redact_enabled) {
+    char *filtered_path = NULL;
+    char *filtered_cmdline = NULL;
+    
+    if (!event) {
+        return -1;
+    }
+    
+    /* Filter file path if present */
+    if (event->file) {
+        filtered_path = privacy_filter_path(event->file, redact_enabled);
+        if (filtered_path) {
+            free(event->file);
+            event->file = filtered_path;
+        } else {
+            /* If filtering failed, keep original but log warning */
+            fprintf(stderr, "Warning: Failed to filter file path\n");
+        }
+    }
+    
+    /* Filter library path if present */
+    if (event->library) {
+        filtered_path = privacy_filter_path(event->library, redact_enabled);
+        if (filtered_path) {
+            free(event->library);
+            event->library = filtered_path;
+        } else {
+            fprintf(stderr, "Warning: Failed to filter library path\n");
+        }
+    }
+    
+    /* Filter executable path if present */
+    if (event->exe) {
+        filtered_path = privacy_filter_path(event->exe, redact_enabled);
+        if (filtered_path) {
+            free(event->exe);
+            event->exe = filtered_path;
+        } else {
+            fprintf(stderr, "Warning: Failed to filter exe path\n");
+        }
+    }
+    
+    /* Filter command line if present */
+    if (event->cmdline) {
+        filtered_cmdline = privacy_filter_cmdline(event->cmdline, redact_enabled);
+        if (filtered_cmdline) {
+            free(event->cmdline);
+            event->cmdline = filtered_cmdline;
+        } else {
+            fprintf(stderr, "Warning: Failed to filter cmdline\n");
+        }
+    }
+    
+    return 0;
 }
