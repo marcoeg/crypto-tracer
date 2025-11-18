@@ -11,7 +11,11 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+/* When included from user-space, we need linux/types.h */
+/* When included from eBPF, vmlinux.h provides all types */
+#ifndef __VMLINUX_H__
 #include <linux/types.h>
+#endif
 
 /* Maximum string lengths */
 #define MAX_FILENAME_LEN 256
@@ -21,16 +25,16 @@
 #define MAX_FUNCNAME_LEN 64
 
 /* Event types */
-enum event_type {
-    EVENT_FILE_OPEN = 1,
-    EVENT_LIB_LOAD = 2,
-    EVENT_PROCESS_EXEC = 3,
-    EVENT_PROCESS_EXIT = 4,
-    EVENT_API_CALL = 5,
+enum ct_event_type {
+    CT_EVENT_FILE_OPEN = 1,
+    CT_EVENT_LIB_LOAD = 2,
+    CT_EVENT_PROCESS_EXEC = 3,
+    CT_EVENT_PROCESS_EXIT = 4,
+    CT_EVENT_API_CALL = 5,
 };
 
-/* Base event header */
-struct event_header {
+/* Base event header - prefixed with ct_ to avoid conflicts with kernel types */
+struct ct_event_header {
     __u64 timestamp_ns;
     __u32 pid;
     __u32 uid;
@@ -39,35 +43,35 @@ struct event_header {
 };
 
 /* File open event */
-struct file_open_event {
-    struct event_header header;
+struct ct_file_open_event {
+    struct ct_event_header header;
     char filename[MAX_FILENAME_LEN];
     __u32 flags;
     __s32 result;
 };
 
 /* Library load event */
-struct lib_load_event {
-    struct event_header header;
+struct ct_lib_load_event {
+    struct ct_event_header header;
     char lib_path[MAX_LIBPATH_LEN];
 };
 
 /* Process execution event */
-struct process_exec_event {
-    struct event_header header;
+struct ct_process_exec_event {
+    struct ct_event_header header;
     __u32 ppid;
     char cmdline[MAX_CMDLINE_LEN];
 };
 
 /* Process exit event */
-struct process_exit_event {
-    struct event_header header;
+struct ct_process_exit_event {
+    struct ct_event_header header;
     __s32 exit_code;
 };
 
 /* API call event */
-struct api_call_event {
-    struct event_header header;
+struct ct_api_call_event {
+    struct ct_event_header header;
     char function_name[MAX_FUNCNAME_LEN];
     char library[MAX_FUNCNAME_LEN];
 };

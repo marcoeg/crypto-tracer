@@ -24,6 +24,11 @@ LDFLAGS := -lelf -lz -lbpf -lcap
 # eBPF compiler flags
 BPF_CFLAGS := -target bpf -D__TARGET_ARCH_x86 -Wall -O2 -g
 BPF_CFLAGS += -I$(EBPF_DIR) -I$(BUILD_DIR)
+# Try to find libbpf headers in common locations
+BPF_CFLAGS += -I/usr/include
+ifneq ($(wildcard /usr/src/linux-headers-$(shell uname -r)/tools/bpf/resolve_btfids/libbpf/include),)
+    BPF_CFLAGS += -I/usr/src/linux-headers-$(shell uname -r)/tools/bpf/resolve_btfids/libbpf/include
+endif
 
 # Static linking option (can be enabled with STATIC=1)
 ifdef STATIC
