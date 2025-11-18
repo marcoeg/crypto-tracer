@@ -115,31 +115,29 @@ static __always_inline int handle_file_open(const char *filename_ptr, __u32 flag
     return 0;
 }
 
-/* Tracepoint for sys_enter_open */
-SEC("tracepoint/syscalls/sys_enter_open")
-int trace_open_enter(struct trace_event_raw_sys_enter *ctx) {
-    /* Arguments for open():
-     * args[0] = const char *filename
-     * args[1] = int flags
-     * args[2] = umode_t mode
-     */
-    const char *filename = (const char *)ctx->args[0];
-    __u32 flags = (__u32)ctx->args[1];
+/* Kprobe for do_sys_open (kernel function)
+ * This is more reliable than tracepoints for file opening
+ */
+SEC("kprobe/do_sys_openat2")
+int trace_do_sys_openat2(struct pt_regs *ctx) {
+    const char *filename;
+    __u32 flags = 0;
+    
+    /* do_sys_openat2(int dfd, const char __user *filename, struct open_how *how) */
+    filename = (const char *)PT_REGS_PARM2(ctx);
     
     return handle_file_open(filename, flags);
 }
 
-/* Tracepoint for sys_enter_openat */
-SEC("tracepoint/syscalls/sys_enter_openat")
-int trace_openat_enter(struct trace_event_raw_sys_enter *ctx) {
-    /* Arguments for openat():
-     * args[0] = int dfd
-     * args[1] = const char *filename
-     * args[2] = int flags
-     * args[3] = umode_t mode
-     */
-    const char *filename = (const char *)ctx->args[1];
-    __u32 flags = (__u32)ctx->args[2];
+/* Fallback kprobe for older kernels */
+SEC("kprobe/do_sys_open")
+int trace_do_sys_open(struct pt_regs *ctx) {
+    const char *filename;
+    __u32 flags;
+    
+    /* do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode) */
+    filename = (const char *)PT_REGS_PARM2(ctx);
+    flags = (__u32)PT_REGS_PARM3(ctx);
     
     return handle_file_open(filename, flags);
 }

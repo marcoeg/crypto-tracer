@@ -26,7 +26,7 @@ endif
 LDFLAGS := -L/usr/lib/x86_64-linux-gnu -lz -lcap
 # Link directly to available library files
 LDFLAGS += /usr/lib/x86_64-linux-gnu/libelf.so.1
-LDFLAGS += /usr/lib/x86_64-linux-gnu/libbpf.so.0
+LDFLAGS += -lbpf
 
 # eBPF compiler flags
 BPF_CFLAGS := -target bpf -D__TARGET_ARCH_x86 -Wall -O2 -g
