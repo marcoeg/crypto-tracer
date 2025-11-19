@@ -27,6 +27,7 @@
 #include "include/output_formatter.h"
 #include "include/profile_manager.h"
 #include "include/proc_scanner.h"
+#include "include/privacy_filter.h"
 
 /* Minimum supported kernel version */
 #define MIN_KERNEL_MAJOR 4
@@ -1314,12 +1315,260 @@ cleanup:
 /**
  * Execute snapshot command
  * Requirement: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
- * Note: Full implementation will be in Task 17
+ * 
+ * Takes a quick snapshot of all cryptographic usage on the system.
+ * Uses /proc filesystem scanning only (no eBPF required).
+ * Target: Complete in under 5 seconds.
  */
 static int execute_snapshot_command(cli_args_t *args) {
-    (void)args;
-    log_info("Snapshot command not yet fully implemented (Task 17)");
-    return EXIT_SUCCESS;
+    proc_scanner_t *scanner = NULL;
+    output_formatter_t *formatter = NULL;
+    FILE *output_file = NULL;
+    snapshot_t snapshot = {0};
+    process_list_t process_list = {0};
+    int ret = EXIT_SUCCESS;
+    time_t start_time, current_time;
+    struct utsname sys_info;
+    char hostname[256] = "unknown";
+    char kernel_version[256] = "unknown";
+    
+    log_info("Starting snapshot...");
+    start_time = time(NULL);
+    
+    /* Get system information */
+    if (uname(&sys_info) == 0) {
+        strncpy(hostname, sys_info.nodename, sizeof(hostname) - 1);
+        snprintf(kernel_version, sizeof(kernel_version), "%s %s", 
+                 sys_info.sysname, sys_info.release);
+    }
+    
+    /* Create proc scanner - Requirement 3.1 */
+    scanner = proc_scanner_create();
+    if (!scanner) {
+        log_error("Failed to create proc scanner");
+        return EXIT_GENERAL_ERROR;
+    }
+    log_debug("Proc scanner created");
+    
+    /* Open output file if specified */
+    if (args->output_file) {
+        output_file = fopen(args->output_file, "w");
+        if (!output_file) {
+            log_error("Failed to open output file: %s", args->output_file);
+            log_system_error("fopen");
+            proc_scanner_destroy(scanner);
+            return EXIT_GENERAL_ERROR;
+        }
+        log_debug("Output file opened: %s", args->output_file);
+    } else {
+        output_file = stdout;
+    }
+    
+    /* Create output formatter */
+    formatter = output_formatter_create(args->format, output_file);
+    if (!formatter) {
+        log_error("Failed to create output formatter");
+        if (args->output_file && output_file) {
+            fclose(output_file);
+        }
+        proc_scanner_destroy(scanner);
+        return EXIT_GENERAL_ERROR;
+    }
+    log_debug("Output formatter created");
+    
+    /* Initialize process list */
+    process_list_init(&process_list);
+    
+    /* Requirement 3.1: Scan all running processes */
+    log_debug("Scanning processes...");
+    if (proc_scanner_scan_processes(scanner, &process_list) != 0) {
+        log_error("Failed to scan processes");
+        ret = EXIT_GENERAL_ERROR;
+        goto cleanup;
+    }
+    log_debug("Found %zu processes", process_list.count);
+    
+    /* Build snapshot structure */
+    snapshot.snapshot_version = "1.0";
+    
+    /* Generate timestamp */
+    time_t now = time(NULL);
+    struct tm tm_info;
+    char timestamp_buf[64];
+    if (gmtime_r(&now, &tm_info) != NULL) {
+        snprintf(timestamp_buf, sizeof(timestamp_buf),
+                 "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                 tm_info.tm_year + 1900,
+                 tm_info.tm_mon + 1,
+                 tm_info.tm_mday,
+                 tm_info.tm_hour,
+                 tm_info.tm_min,
+                 tm_info.tm_sec);
+        snapshot.generated_at = timestamp_buf;
+    } else {
+        snapshot.generated_at = "unknown";
+    }
+    
+    snapshot.hostname = hostname;
+    snapshot.kernel = kernel_version;
+    
+    /* Allocate processes array */
+    snapshot.process_count = 0;
+    snapshot.processes = calloc(process_list.count, sizeof(*snapshot.processes));
+    if (!snapshot.processes) {
+        log_error("Failed to allocate snapshot processes array");
+        ret = EXIT_GENERAL_ERROR;
+        goto cleanup;
+    }
+    
+    /* Initialize summary statistics */
+    snapshot.summary.total_processes = 0;
+    snapshot.summary.total_libraries = 0;
+    snapshot.summary.total_files = 0;
+    
+    /* Scan each process for crypto libraries and files */
+    log_debug("Scanning for crypto libraries and files...");
+    
+    for (size_t i = 0; i < process_list.count; i++) {
+        process_info_t *proc_info = &process_list.processes[i];
+        library_list_t lib_list = {0};
+        file_list_t file_list = {0};
+        
+        /* Check timeout - Requirement 3.5: Complete in under 5 seconds */
+        current_time = time(NULL);
+        if (difftime(current_time, start_time) >= 5.0) {
+            log_warn("Snapshot timeout reached (5 seconds), stopping scan");
+            break;
+        }
+        
+        /* Initialize lists */
+        library_list_init(&lib_list);
+        file_list_init(&file_list);
+        
+        /* Requirement 3.2: Get loaded crypto libraries */
+        proc_scanner_get_loaded_libraries(scanner, proc_info->pid, &lib_list);
+        
+        /* Requirement 3.3: Get open crypto files */
+        proc_scanner_get_open_files(scanner, proc_info->pid, &file_list);
+        
+        /* Only include processes that have crypto libraries or files */
+        if (lib_list.count > 0 || file_list.count > 0) {
+            size_t proc_idx = snapshot.process_count;
+            
+            /* Fill process information */
+            snapshot.processes[proc_idx].pid = proc_info->pid;
+            snapshot.processes[proc_idx].name = strdup(proc_info->comm);
+            
+            /* Apply privacy filtering - Requirement 6.1, 6.2, 6.3 */
+            char *filtered_exe = privacy_filter_path(proc_info->exe, !args->no_redact);
+            snapshot.processes[proc_idx].exe = filtered_exe ? filtered_exe : strdup(proc_info->exe);
+            
+            /* Format running_as (UID) */
+            char running_as_buf[32];
+            snprintf(running_as_buf, sizeof(running_as_buf), "uid:%u", proc_info->uid);
+            snapshot.processes[proc_idx].running_as = strdup(running_as_buf);
+            
+            /* Copy libraries */
+            snapshot.processes[proc_idx].library_count = lib_list.count;
+            if (lib_list.count > 0) {
+                snapshot.processes[proc_idx].libraries = calloc(lib_list.count, sizeof(char *));
+                for (size_t j = 0; j < lib_list.count; j++) {
+                    char *filtered_lib = privacy_filter_path(lib_list.libraries[j].path, !args->no_redact);
+                    snapshot.processes[proc_idx].libraries[j] = filtered_lib ? filtered_lib : strdup(lib_list.libraries[j].path);
+                }
+                snapshot.summary.total_libraries += lib_list.count;
+            } else {
+                snapshot.processes[proc_idx].libraries = NULL;
+            }
+            
+            /* Copy open crypto files */
+            snapshot.processes[proc_idx].file_count = file_list.count;
+            if (file_list.count > 0) {
+                snapshot.processes[proc_idx].open_crypto_files = calloc(file_list.count, sizeof(char *));
+                for (size_t j = 0; j < file_list.count; j++) {
+                    char *filtered_file = privacy_filter_path(file_list.files[j].path, !args->no_redact);
+                    snapshot.processes[proc_idx].open_crypto_files[j] = filtered_file ? filtered_file : strdup(file_list.files[j].path);
+                }
+                snapshot.summary.total_files += file_list.count;
+            } else {
+                snapshot.processes[proc_idx].open_crypto_files = NULL;
+            }
+            
+            snapshot.process_count++;
+            snapshot.summary.total_processes++;
+        }
+        
+        /* Cleanup lists */
+        library_list_free(&lib_list);
+        file_list_free(&file_list);
+    }
+    
+    /* Requirement 3.4: Generate snapshot document */
+    log_info("Generating snapshot document...");
+    if (output_formatter_write_snapshot(formatter, &snapshot) != 0) {
+        log_error("Failed to write snapshot to output");
+        ret = EXIT_GENERAL_ERROR;
+        goto cleanup;
+    }
+    
+    /* Log completion time */
+    current_time = time(NULL);
+    double elapsed = difftime(current_time, start_time);
+    log_info("Snapshot complete in %.2f seconds", elapsed);
+    log_info("Found %d processes using cryptography", snapshot.summary.total_processes);
+    log_info("Total libraries: %d, Total files: %d", 
+             snapshot.summary.total_libraries, snapshot.summary.total_files);
+    
+    ret = EXIT_SUCCESS;
+    
+cleanup:
+    log_debug("Cleaning up resources...");
+    
+    /* Free snapshot data */
+    if (snapshot.processes) {
+        for (size_t i = 0; i < snapshot.process_count; i++) {
+            free(snapshot.processes[i].name);
+            free(snapshot.processes[i].exe);
+            free(snapshot.processes[i].running_as);
+            
+            if (snapshot.processes[i].libraries) {
+                for (size_t j = 0; j < snapshot.processes[i].library_count; j++) {
+                    free(snapshot.processes[i].libraries[j]);
+                }
+                free(snapshot.processes[i].libraries);
+            }
+            
+            if (snapshot.processes[i].open_crypto_files) {
+                for (size_t j = 0; j < snapshot.processes[i].file_count; j++) {
+                    free(snapshot.processes[i].open_crypto_files[j]);
+                }
+                free(snapshot.processes[i].open_crypto_files);
+            }
+        }
+        free(snapshot.processes);
+    }
+    
+    /* Cleanup process list */
+    process_list_free(&process_list);
+    
+    /* Cleanup output formatter */
+    if (formatter) {
+        output_formatter_destroy(formatter);
+    }
+    
+    /* Close output file if we opened it */
+    if (args->output_file && output_file && output_file != stdout) {
+        fclose(output_file);
+    }
+    
+    /* Cleanup proc scanner */
+    if (scanner) {
+        proc_scanner_destroy(scanner);
+    }
+    
+    log_debug("Cleanup complete");
+    
+    return ret;
 }
 
 /**
