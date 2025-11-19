@@ -135,7 +135,50 @@ make static
 
 ## Known Issues on ARM64
 
-### 1. Symbol Conflicts with Static Linking
+### 1. Runtime BTF Loading Errors (CRITICAL)
+
+When running the binary on ARM64, you may see these errors:
+
+```
+[WARN] libbpf: libbpf: failed to find valid kernel BTF
+[WARN] libbpf: libbpf: Error loading vmlinux BTF: -3
+[ERROR] Failed to load eBPF program: process_exec_trace (error code: -3)
+```
+
+**Cause:** The kernel doesn't have BTF (BPF Type Format) support enabled, or `/sys/kernel/btf/vmlinux` doesn't exist.
+
+**Solutions:**
+
+1. **Check if BTF is available:**
+   ```bash
+   ls -la /sys/kernel/btf/vmlinux
+   ```
+
+2. **If BTF is missing, install kernel with BTF support:**
+   ```bash
+   # On Ubuntu/Debian
+   sudo apt update
+   sudo apt install linux-image-$(uname -r)
+   
+   # Or install a newer kernel with BTF
+   sudo apt install linux-image-generic
+   sudo reboot
+   ```
+
+3. **Verify kernel config has BTF enabled:**
+   ```bash
+   zgrep CONFIG_DEBUG_INFO_BTF /proc/config.gz
+   # Should show: CONFIG_DEBUG_INFO_BTF=y
+   ```
+
+4. **If BTF cannot be enabled, the program will not work** on that kernel. BTF is required for eBPF CO-RE programs to load. You need:
+   - Linux kernel 5.2+ for BTF support
+   - `CONFIG_DEBUG_INFO_BTF=y` in kernel config
+   - `/sys/kernel/btf/vmlinux` file present
+
+**EC2 Graviton Note:** Some EC2 ARM64 instances may have older kernels without BTF. Consider upgrading to Ubuntu 22.04 or newer with a 5.15+ kernel, or use Amazon Linux 2023 which has BTF enabled by default.
+
+### 2. Symbol Conflicts with Static Linking
 
 When building with static linking, you may encounter symbol conflicts between crypto-tracer's internal functions and libbpf:
 
@@ -145,11 +188,11 @@ multiple definition of `glob_match'
 
 **Solution:** The function `glob_match` in `src/event_processor.c` has been renamed to `crypto_glob_match` to avoid conflicts.
 
-### 2. Library Path Issues
+### 3. Library Path Issues
 
 ARM64 systems use different library paths (`/usr/lib/aarch64-linux-gnu/`) compared to x86_64 (`/usr/lib/x86_64-linux-gnu/`). The Makefile modifications above handle this automatically.
 
-### 3. Kernel Header Locations
+### 4. Kernel Header Locations
 
 On some ARM64 systems, kernel headers may be in non-standard locations. The Makefile modifications include search paths for common locations.
 
@@ -172,8 +215,8 @@ sudo ./build/crypto-tracer files --duration 5
 
 ### Instance Types Tested
 
-- **t4g.micro**: Successfully built and tested
-- **t4g.small**: Successfully built and tested
+- **t4g.micro**: Built successfully, runtime requires BTF support
+- **t4g.small**: Built successfully, runtime requires BTF support
 
 ### Disk Space Requirements
 
@@ -183,6 +226,46 @@ sudo ./build/crypto-tracer files --duration 5
 ### Performance
 
 ARM64 builds perform comparably to x86_64 builds. eBPF overhead remains <0.5% CPU on Graviton2 processors.
+
+### Recommended EC2 Setup for ARM64
+
+For best results on EC2 Graviton instances:
+
+1. **Use Ubuntu 22.04 LTS or newer:**
+   ```bash
+   # Check your Ubuntu version
+   lsb_release -a
+   ```
+
+2. **Verify kernel version (need 5.15+):**
+   ```bash
+   uname -r
+   # Should be 5.15 or higher
+   ```
+
+3. **Check BTF availability:**
+   ```bash
+   ls -la /sys/kernel/btf/vmlinux
+   # If this file doesn't exist, eBPF programs won't load
+   ```
+
+4. **If BTF is missing, upgrade kernel:**
+   ```bash
+   sudo apt update
+   sudo apt upgrade
+   sudo apt install linux-image-generic
+   sudo reboot
+   ```
+
+### Alternative: Use Amazon Linux 2023
+
+Amazon Linux 2023 has BTF enabled by default and works well with crypto-tracer on ARM64:
+
+```bash
+# On Amazon Linux 2023
+sudo dnf install gcc clang libbpf-devel elfutils-libelf-devel zlib-devel
+sudo dnf install bpftool kernel-devel
+```
 
 ## Cross-Compilation
 
