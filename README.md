@@ -9,7 +9,7 @@ crypto-tracer provides real-time visibility into cryptographic behavior by obser
 
 
 ### Full CipherIQ Documentation
-#### Read the full CipherIQ **[documentation](https://www.cipheriq.io)** website.
+#### Read the full CipherIQ **[documentation](https://www.cipheriq.io/crypto-tracer/)** website.
 
 ## License
 
